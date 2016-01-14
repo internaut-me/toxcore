@@ -28,8 +28,8 @@
 
 #include <time.h>
 
-/* for CLIENT_ID_SIZE */
-#include "DHT.h"
+/* for crypto_box_PUBLICKEYBYTES */
+#include "crypto_core.h"
 
 #include "util.h"
 
@@ -60,13 +60,13 @@ int is_timeout(uint64_t timestamp, uint64_t timeout)
 /* id functions */
 bool id_equal(const uint8_t *dest, const uint8_t *src)
 {
-    return memcmp(dest, src, CLIENT_ID_SIZE) == 0;
+    return memcmp(dest, src, crypto_box_PUBLICKEYBYTES) == 0;
 }
 
 uint32_t id_copy(uint8_t *dest, const uint8_t *src)
 {
-    memcpy(dest, src, CLIENT_ID_SIZE);
-    return CLIENT_ID_SIZE;
+    memcpy(dest, src, crypto_box_PUBLICKEYBYTES);
+    return crypto_box_PUBLICKEYBYTES;
 }
 
 void host_to_net(uint8_t *num, uint16_t numbytes)
@@ -153,8 +153,15 @@ int load_state(load_state_callback_func load_state_callback, void *outer,
 
         type = lendian_to_host16(cookie_type & 0xFFFF);
 
-        if (-1 == load_state_callback(outer, data, length_sub, type))
+        int ret = load_state_callback(outer, data, length_sub, type);
+
+        if (ret == -1) {
             return -1;
+        }
+
+        /* -2 means end of save. */
+        if (ret == -2)
+            return 0;
 
         data += length_sub;
         length -= length_sub;
@@ -162,3 +169,110 @@ int load_state(load_state_callback_func load_state_callback, void *outer,
 
     return length == 0 ? 0 : -1;
 };
+
+int create_recursive_mutex(pthread_mutex_t *mutex)
+{
+    pthread_mutexattr_t attr;
+
+    if (pthread_mutexattr_init(&attr) != 0)
+        return -1;
+
+    if (pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) != 0) {
+        pthread_mutexattr_destroy(&attr);
+        return -1;
+    }
+
+    /* Create queue mutex */
+    if (pthread_mutex_init(mutex, &attr) != 0) {
+        pthread_mutexattr_destroy(&attr);
+        return -1;
+    }
+
+    pthread_mutexattr_destroy(&attr);
+
+    return 0;
+}
+
+
+struct RingBuffer {
+    uint16_t size; /* Max size */
+    uint16_t start;
+    uint16_t end;
+    void   **data;
+};
+
+bool rb_full(const RingBuffer *b)
+{
+    return (b->end + 1) % b->size == b->start;
+}
+bool rb_empty(const RingBuffer *b)
+{
+    return b->end == b->start;
+}
+void *rb_write(RingBuffer *b, void *p)
+{
+    void *rc = NULL;
+
+    if ((b->end + 1) % b->size == b->start) /* full */
+        rc = b->data[b->start];
+
+    b->data[b->end] = p;
+    b->end = (b->end + 1) % b->size;
+
+    if (b->end == b->start)
+        b->start = (b->start + 1) % b->size;
+
+    return rc;
+}
+bool rb_read(RingBuffer *b, void **p)
+{
+    if (b->end == b->start) { /* Empty */
+        *p = NULL;
+        return false;
+    }
+
+    *p = b->data[b->start];
+    b->start = (b->start + 1) % b->size;
+    return true;
+}
+RingBuffer *rb_new(int size)
+{
+    RingBuffer *buf = calloc(sizeof(RingBuffer), 1);
+
+    if (!buf) return NULL;
+
+    buf->size = size + 1; /* include empty elem */
+
+    if (!(buf->data = calloc(buf->size, sizeof(void *)))) {
+        free(buf);
+        return NULL;
+    }
+
+    return buf;
+}
+void rb_kill(RingBuffer *b)
+{
+    if (b) {
+        free(b->data);
+        free(b);
+    }
+}
+uint16_t rb_size(const RingBuffer *b)
+{
+    if (rb_empty(b))
+        return 0;
+
+    return
+        b->end > b->start ?
+        b->end - b->start :
+        (b->size - b->start) + b->end;
+}
+uint16_t rb_data(const RingBuffer *b, void **dest)
+{
+    uint16_t i = 0;
+
+    for (; i < rb_size(b); i++)
+        dest[i] = b->data[(b->start + i) % b->size];
+
+    return i;
+}

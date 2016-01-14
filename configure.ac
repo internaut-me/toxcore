@@ -2,11 +2,11 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.65])
-AC_INIT([tox], [0.0.0], [https://tox.im])
+AC_INIT([tox], [0.0.0])
 AC_CONFIG_AUX_DIR(configure_aux)
 AC_CONFIG_SRCDIR([toxcore/net_crypto.c])
 AC_CONFIG_HEADERS([config.h])
-AM_INIT_AUTOMAKE([1.10 -Wall subdir-objects])
+AM_INIT_AUTOMAKE([foreign 1.10 -Wall subdir-objects tar-ustar])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -33,7 +33,7 @@ BUILD_TESTS="yes"
 BUILD_AV="yes"
 BUILD_TESTING="yes"
 
-LOGGING="no"
+TOX_LOGGER="no"
 LOGGING_OUTNAM="libtoxcore.log"
 
 NCURSES_FOUND="no"
@@ -86,33 +86,36 @@ AC_ARG_ENABLE([logging],
     [AC_HELP_STRING([--enable-logging], [enable logging (default: auto)]) ],
     [
         if test "x$enableval" = "xyes"; then
-            LOGGING="yes"
-            
-            AC_DEFINE([LOGGING], [], [If logging enabled])
-            AC_DEFINE([LOGGER_LEVEL], [DEBUG], [LoggerLevel value])
+            TOX_LOGGER="yes"
+
+            AC_DEFINE([TOX_LOGGER], [], [If logging enabled])
+            AC_DEFINE([LOGGER_LEVEL], [LOG_DEBUG], [LOG_LEVEL value])
             AC_DEFINE_UNQUOTED([LOGGER_OUTPUT_FILE], ["$LOGGING_OUTNAM"], [Output of logger])
         fi
     ]
 )
 
-AC_ARG_WITH(logger-level,
-    AC_HELP_STRING([--with-logger-level=LEVEL],
-                   [Logger levels: INFO; DEBUG; WARNING; ERROR ]),
+AC_ARG_WITH(log-level,
+    AC_HELP_STRING([--with-log-level=LEVEL],
+                   [Logger levels: TRACE; DEBUG; INFO; WARNING; ERROR ]),
     [
-        if test "x$LOGGING" = "xno"; then
+        if test "x$TOX_LOGGER" = "xno"; then
             AC_MSG_WARN([Logging disabled!])
         else
-            if test "x$withval" = "xINFO"; then
-                AC_DEFINE([LOGGER_LEVEL], [INFO], [LoggerLevel value])
-                
+            if test "x$withval" = "xTRACE"; then
+                AC_DEFINE([LOGGER_LEVEL], [LOG_TRACE], [LOG_LEVEL value])
+
             elif test "x$withval" = "xDEBUG"; then
-                AC_DEFINE([LOGGER_LEVEL], [DEBUG], [LoggerLevel value])
-                
+                AC_DEFINE([LOGGER_LEVEL], [LOG_DEBUG], [LOG_LEVEL value])
+
+            elif test "x$withval" = "xINFO"; then
+                AC_DEFINE([LOGGER_LEVEL], [LOG_INFO], [LOG_LEVEL value])
+
             elif test "x$withval" = "xWARNING"; then
-                AC_DEFINE([LOGGER_LEVEL], [WARNING], [LoggerLevel value])
-                
+                AC_DEFINE([LOGGER_LEVEL], [LOG_WARNING], [LOG_LEVEL value])
+
             elif test "x$withval" = "xERROR"; then
-                AC_DEFINE([LOGGER_LEVEL], [ERROR], [LoggerLevel value])
+                AC_DEFINE([LOGGER_LEVEL], [LOG_ERROR], [LOG_LEVEL value])
             else
                 AC_MSG_WARN([Invalid logger level: $withval. Using default 'DEBUG'])
             fi
@@ -120,11 +123,11 @@ AC_ARG_WITH(logger-level,
     ]
 )
 
-AC_ARG_WITH(logger-path,
-    AC_HELP_STRING([--with-logger-path=DIR],
+AC_ARG_WITH(log-path,
+    AC_HELP_STRING([--with-log-path=DIR],
                    [Path of logger output]),
     [
-        if test "x$LOGGING" = "xno"; then
+        if test "x$TOX_LOGGER" = "xno"; then
             AC_MSG_WARN([Logging disabled!])
         else
             AC_DEFINE_UNQUOTED([LOGGER_OUTPUT_FILE], ["$withval""/""$LOGGING_OUTNAM"], [Output of logger])
@@ -371,20 +374,20 @@ else
     LDFLAGS_SAVE="$LDFLAGS"
     if test -n "$LIBSODIUM_SEARCH_LIBS"; then
         LDFLAGS="-L$LIBSODIUM_SEARCH_LIBS $LDFLAGS"
-        AC_CHECK_LIB(sodium, randombytes_random,
+        AC_CHECK_LIB(sodium, crypto_pwhash_scryptsalsa208sha256,
             [
                 LIBSODIUM_LDFLAGS="-L$LIBSODIUM_SEARCH_LIBS"
                 LIBSODIUM_LIBS="-lsodium"
             ],
             [
-                AC_MSG_ERROR([required library libsodium was not found in requested location $LIBSODIUM_SEARCH_LIBS])
+                AC_MSG_ERROR([required library libsodium was not found in requested location $LIBSODIUM_SEARCH_LIBS or library version is too old])
             ]
         )
     else
-        AC_CHECK_LIB(sodium, randombytes_random,
+        AC_CHECK_LIB(sodium, crypto_pwhash_scryptsalsa208sha256,
             [],
             [
-                AC_MSG_ERROR([required library libsodium was not found on your system, please check http://download.libsodium.org/libsodium/releases/])
+                AC_MSG_ERROR([required library libsodium was not found on your system, please check http://download.libsodium.org/libsodium/releases/ or library version is too old])
             ]
         )
     fi
@@ -469,7 +472,7 @@ AC_C_BIGENDIAN
 # Checks for library functions.
 AC_FUNC_FORK
 AC_CHECK_FUNCS([gettimeofday memset socket strchr malloc])
-if (test "x$WIN32" != "xyes") && (test "x$MACH" != "xyes") && (test "x$DISABLE_RT" != "xyes"); then
+if (test "x$WIN32" != "xyes") && (test "x$MACH" != "xyes") && (test "x${host_os#*openbsd}" == "x$host_os") && (test "x$DISABLE_RT" != "xyes"); then
     AC_CHECK_LIB(rt, clock_gettime,
         [
             RT_LIBS="-lrt"
@@ -486,6 +489,13 @@ AX_PTHREAD(
     [],
     [
         AC_MSG_ERROR([required library pthread was not found on your system])
+    ]
+)
+
+AC_CHECK_LIB([pthread], [pthread_self],
+    [
+        PTHREAD_LDFLAGS="-lpthread"
+        AC_SUBST(PTHREAD_LDFLAGS)
     ]
 )
 
@@ -512,8 +522,7 @@ fi
 if test "x$BUILD_AV" = "xyes"; then
     # toxcore lib needs an global?
     # So far this works okay
-    ## What about pthread?
-    AV_LIBS="$OPUS_LIBS $VPX_LIBS -pthread"
+    AV_LIBS="$OPUS_LIBS $VPX_LIBS"
     AC_SUBST(AV_LIBS)
 
     AV_CFLAGS="$OPUS_CFLAGS $VPX_CFLAGS"
@@ -684,6 +693,7 @@ AM_CONDITIONAL(WIN32, test "x$WIN32" = "xyes")
 AC_CONFIG_FILES([Makefile
                  build/Makefile
                  libtoxcore.pc
+                 tox.spec
                 ])
 
 AM_COND_IF(BUILD_AV,

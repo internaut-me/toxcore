@@ -50,10 +50,10 @@ START_TEST(test_m_sendmesage)
     int bad_len = MAX_CRYPTO_PACKET_SIZE;
 
 
-    ck_assert(m_sendmessage(m, -1, (uint8_t *)message, good_len) == 0);
-    ck_assert(m_sendmessage(m, REALLY_BIG_NUMBER, (uint8_t *)message, good_len) == 0);
-    ck_assert(m_sendmessage(m, 17, (uint8_t *)message, good_len) == 0);
-    ck_assert(m_sendmessage(m, friend_id_num, (uint8_t *)message, bad_len) == 0);
+    ck_assert(m_send_message_generic(m, -1, MESSAGE_NORMAL, (uint8_t *)message, good_len, 0) == -1);
+    ck_assert(m_send_message_generic(m, REALLY_BIG_NUMBER, MESSAGE_NORMAL, (uint8_t *)message, good_len, 0) == -1);
+    ck_assert(m_send_message_generic(m, 17, MESSAGE_NORMAL, (uint8_t *)message, good_len, 0) == -1);
+    ck_assert(m_send_message_generic(m, friend_id_num, MESSAGE_NORMAL, (uint8_t *)message, bad_len, 0) == -2);
 }
 END_TEST
 
@@ -68,10 +68,10 @@ START_TEST(test_m_get_userstatus_size)
     rc = m_get_statusmessage_size(m, friend_id_num);
 
     /* this WILL error if the original m_addfriend_norequest() failed */
-    ck_assert_msg((rc > 0 && rc <= MAX_STATUSMESSAGE_LENGTH),
-                  "m_get_statusmessage_size is returning out of range values!\n"
+    ck_assert_msg((rc >= 0 && rc <= MAX_STATUSMESSAGE_LENGTH),
+                  "m_get_statusmessage_size is returning out of range values! (%i)\n"
                   "(this can be caused by the error of m_addfriend_norequest"
-                  " in the beginning of the suite)\n");
+                  " in the beginning of the suite)\n", rc);
 }
 END_TEST
 
@@ -135,7 +135,7 @@ START_TEST(test_m_addfriend)
     if(m_addfriend(m, (uint8_t *)friend_id, (uint8_t *)good_data, really_bad_len) != FAERR_TOOLONG)
         ck_abort_msg("m_addfriend did NOT catch the following length: %d\n", really_bad_len);
 */
-/* this will error if the original m_addfriend_norequest() failed */
+/* this will return an error if the original m_addfriend_norequest() failed */
 /*    if(m_addfriend(m, (uint8_t *)friend_id, (uint8_t *)good_data, good_len) != FAERR_ALREADYSENT)
         ck_abort_msg("m_addfriend did NOT catch adding a friend we already have.\n"
                      "(this can be caused by the error of m_addfriend_norequest in"
@@ -144,7 +144,7 @@ START_TEST(test_m_addfriend)
     if(m_addfriend(m, (uint8_t *)good_id_b, (uint8_t *)bad_data, bad_len) != FAERR_NOMESSAGE)
         ck_abort_msg("m_addfriend did NOT catch the following length: %d\n", bad_len);
 */
-/* this should REALLY error */
+/* this should REALLY return an error */
 /*
  * TODO: validate client_id in m_addfriend?
 if(m_addfriend((uint8_t *)bad_id, (uint8_t *)good_data, good_len) >= 0)
@@ -337,7 +337,7 @@ int main(int argc, char *argv[])
     /* IPv6 status from global define */
     Messenger_Options options = {0};
     options.ipv6enabled = TOX_ENABLE_IPV6_DEFAULT;
-    m = new_messenger(&options);
+    m = new_messenger(&options, 0);
 
     /* setup a default friend and friendnum */
     if (m_addfriend_norequest(m, (uint8_t *)friend_id) < 0)

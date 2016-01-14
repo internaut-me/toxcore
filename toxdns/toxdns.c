@@ -44,7 +44,7 @@ uint8_t i = 0; \
         } \
     } \
 } \
- 
+
 typedef struct {
     uint8_t temp_pk[crypto_box_PUBLICKEYBYTES];
     uint8_t temp_sk[crypto_box_SECRETKEYBYTES];
@@ -160,25 +160,14 @@ static int decode(uint8_t *dest, uint8_t *src)
     while (*p) {
         uint8_t ch = *p++;
 
-        switch (ch) {
-            case 'A' ... 'Z': {
-                ch = ch - 'A';
-                break;
-            }
-
-            case 'a' ... 'z': {
-                ch = ch - 'a';
-                break;
-            }
-
-            case '0' ... '5': {
-                ch = ch - '0' + 26;
-                break;
-            }
-
-            default: {
-                return - 1;
-            }
+        if ('A' <= ch && ch <= 'Z') {
+            ch = ch - 'A';
+        } else if ('a' <= ch && ch <= 'z') {
+            ch = ch - 'a';
+        } else if ('0' <= ch && ch <= '5') {
+            ch = ch - '0' + 26;
+        } else {
+            return - 1;
         }
 
         *op |= (ch << bits);

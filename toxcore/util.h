@@ -27,8 +27,10 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <pthread.h>
 
-#define inline__ inline __attribute__((always_inline))
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define PAIR(TYPE1__, TYPE2__) struct { TYPE1__ first; TYPE2__ second; }
 
 void unix_time_update();
 uint64_t unix_time();
@@ -46,10 +48,25 @@ uint16_t lendian_to_host16(uint16_t lendian);
 #define host_tolendian16(x) lendian_to_host16(x)
 
 void host_to_lendian32(uint8_t *dest,  uint32_t num);
+void lendian_to_host32(uint32_t *dest, const uint8_t *lendian);
 
 /* state load/save */
 typedef int (*load_state_callback_func)(void *outer, const uint8_t *data, uint32_t len, uint16_t type);
 int load_state(load_state_callback_func load_state_callback, void *outer,
                const uint8_t *data, uint32_t length, uint16_t cookie_inner);
+
+/* Returns -1 if failed or 0 if success */
+int create_recursive_mutex(pthread_mutex_t *mutex);
+
+/* Ring buffer */
+typedef struct RingBuffer RingBuffer;
+bool rb_full(const RingBuffer *b);
+bool rb_empty(const RingBuffer *b);
+void *rb_write(RingBuffer *b, void *p);
+bool rb_read(RingBuffer *b, void **p);
+RingBuffer *rb_new(int size);
+void rb_kill(RingBuffer *b);
+uint16_t rb_size(const RingBuffer *b);
+uint16_t rb_data(const RingBuffer *b, void **dest);
 
 #endif /* __UTIL_H__ */

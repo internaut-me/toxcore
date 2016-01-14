@@ -20,10 +20,14 @@
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#endif /* HAVE_CONFIG_H */
 
 #include "group.h"
+#include "../toxcore/util.h"
 #include "../toxcore/logger.h"
+
+#define GROUP_JBUF_SIZE 6
+#define GROUP_JBUF_DEAD_SECONDS 4
 
 typedef struct {
     uint16_t sequnum;
@@ -37,6 +41,7 @@ typedef struct {
     uint32_t capacity;
     uint16_t bottom;
     uint16_t top;
+    uint64_t last_queued_time;
 } Group_JitterBuffer;
 
 static Group_JitterBuffer *create_queue(unsigned int capacity)
@@ -49,7 +54,7 @@ static Group_JitterBuffer *create_queue(unsigned int capacity)
 
     Group_JitterBuffer *q;
 
-    if ( !(q = calloc(sizeof(Group_JitterBuffer), 1)) ) return NULL;
+    if (!(q = calloc(sizeof(Group_JitterBuffer), 1))) return NULL;
 
     if (!(q->queue = calloc(sizeof(Group_Audio_Packet *), size))) {
         free(q);
@@ -88,11 +93,19 @@ static int queue(Group_JitterBuffer *q, Group_Audio_Packet *pk)
 
     unsigned int num = sequnum % q->size;
 
+    if (!is_timeout(q->last_queued_time, GROUP_JBUF_DEAD_SECONDS)) {
+        if ((uint32_t)(sequnum - q->bottom) > (1 << 15)) {
+            /* Drop old packet. */
+            return -1;
+        }
+    }
+
     if ((uint32_t)(sequnum - q->bottom) > q->size) {
         clear_queue(q);
         q->bottom = sequnum - q->capacity;
         q->queue[num] = pk;
         q->top = sequnum + 1;
+        q->last_queued_time = unix_time();
         return 0;
     }
 
@@ -104,6 +117,7 @@ static int queue(Group_JitterBuffer *q, Group_Audio_Packet *pk)
     if ((sequnum - q->bottom) >= (q->top - q->bottom))
         q->top = sequnum + 1;
 
+    q->last_queued_time = unix_time();
     return 0;
 }
 
@@ -176,7 +190,7 @@ static int recreate_encoder(Group_AV *group_av)
     group_av->audio_encoder = opus_encoder_create(group_av->audio_sample_rate, group_av->audio_channels,
                               OPUS_APPLICATION_AUDIO, &rc);
 
-    if ( rc != OPUS_OK ) {
+    if (rc != OPUS_OK) {
         LOGGER_ERROR("Error while starting audio encoder: %s", opus_strerror(rc));
         group_av->audio_encoder = NULL;
         return -1;
@@ -184,7 +198,7 @@ static int recreate_encoder(Group_AV *group_av)
 
     rc = opus_encoder_ctl(group_av->audio_encoder, OPUS_SET_BITRATE(group_av->audio_bitrate));
 
-    if ( rc != OPUS_OK ) {
+    if (rc != OPUS_OK) {
         LOGGER_ERROR("Error while setting encoder ctl: %s", opus_strerror(rc));
         opus_encoder_destroy(group_av->audio_encoder);
         group_av->audio_encoder = NULL;
@@ -193,7 +207,7 @@ static int recreate_encoder(Group_AV *group_av)
 
     rc = opus_encoder_ctl(group_av->audio_encoder, OPUS_SET_COMPLEXITY(10));
 
-    if ( rc != OPUS_OK ) {
+    if (rc != OPUS_OK) {
         LOGGER_ERROR("Error while setting encoder ctl: %s", opus_strerror(rc));
         opus_encoder_destroy(group_av->audio_encoder);
         group_av->audio_encoder = NULL;
@@ -230,7 +244,7 @@ static void group_av_peer_new(void *object, int groupnumber, int friendgroupnumb
     if (!peer_av)
         return;
 
-    peer_av->buffer = create_queue(5); //TODO Use variable instead.
+    peer_av->buffer = create_queue(GROUP_JBUF_SIZE);
     group_peer_set_object(group_av->g_c, groupnumber, friendgroupnumber, peer_av);
 }
 
@@ -266,7 +280,7 @@ static int decode_audio_packet(Group_AV *group_av, Group_Peer_AV *peer_av, int g
         return -1;
 
     int16_t *out_audio = NULL;
-    unsigned int out_audio_samples = 0;
+    int out_audio_samples = 0;
 
     unsigned int sample_rate = 48000;
 
@@ -292,7 +306,7 @@ static int decode_audio_packet(Group_AV *group_av, Group_Peer_AV *peer_av, int g
             int rc;
             peer_av->audio_decoder = opus_decoder_create(sample_rate, channels, &rc);
 
-            if ( rc != OPUS_OK ) {
+            if (rc != OPUS_OK) {
                 LOGGER_ERROR("Error while starting audio decoder: %s", opus_strerror(rc));
                 free(pk);
                 return -1;
